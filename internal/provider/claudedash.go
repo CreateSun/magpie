@@ -35,34 +35,78 @@ func ClaudeDashed(id string) string {
 	return claudeDotted.ReplaceAllStringFunc(id, func(s string) string { return strings.ReplaceAll(s, ".", "-") })
 }
 
+// claude1MMark is Claude Code's [1m] mark. A provider may name a model
+// with it in capitals (relay/claude-opus-4.6[1M]), and Claude Code reads
+// the mark in lower case alone, so every reading of it here is the same in
+// either case: a [1M] left unread is a mark still on the id when the dashed
+// spelling is compared, which then never comes back to the served id and
+// the gateway passes it on as a model the provider has not.
+const claude1MMark = "[1m]"
+
+// claudeHas1M says ref ends with the [1m] mark, in either case.
+func claudeHas1M(ref string) bool {
+	return len(ref) >= len(claude1MMark) && strings.EqualFold(ref[len(ref)-len(claude1MMark):], claude1MMark)
+}
+
+// claudeCut1M takes the [1m] mark, in either case, off ref.
+func claudeCut1M(ref string) string {
+	if claudeHas1M(ref) {
+		return ref[:len(ref)-len(claude1MMark)]
+	}
+	return ref
+}
+
+// ClaudeMark is Claude Code's [1m] mark, the one it writes and reads.
+const ClaudeMark = claude1MMark
+
+// ClaudeCut1M takes Claude Code's [1m] mark off ref, spelled "[1M]" by a
+// provider too: the mark is Claude Code's, and a served id that names it in
+// capitals is the same model to it.
+func ClaudeCut1M(ref string) string { return claudeCut1M(ref) }
+
+// ClaudeHas1M says ref ends with Claude Code's [1m] mark, either case.
+func ClaudeHas1M(ref string) bool { return claudeHas1M(ref) }
+
 // claudeSplit splits a model as an agent is given it into the id and what
 // follows it: an effort fixed on it (":high", MemberEfforts) and Claude
 // Code's [1m] mark.
 func claudeSplit(ref string) (id, rest string) {
-	const mark = "[1m]"
-	id, marked := strings.CutSuffix(ref, mark)
+	marked := claudeHas1M(ref)
+	id = claudeCut1M(ref)
 	if i := strings.LastIndex(id, ":"); i > 0 && slices.Contains(MemberEfforts, strings.ToLower(id[i+1:])) {
 		id, rest = id[:i], id[i:]
 	}
 	if marked {
-		rest += mark
+		rest += claude1MMark
 	}
 	return id, rest
 }
 
 // ClaudeUndashed is the served id (a provider's model or a routing group)
-// whose dashed spelling (ClaudeDashed) ref is, its effort and [1m] mark
-// kept, when ref is no served id as it is and exactly one served id is so
-// spelled. An id served as it is spelled always wins.
+// whose dashed spelling (ClaudeDashed) ref is, its effort kept, when ref is
+// no served id as it is and exactly one served id is so spelled. An id
+// served as it is spelled always wins.
+//
+// The mark is the served id's to spell, not the agent's: Claude Code takes
+// [1m] off before it asks, and a provider may name its model [1M]
+// (relay/claude-opus-4.6[1M]), so the one given back is the served id's own
+// spelling and none of ref's.
 func ClaudeUndashed(ref string) (string, bool) {
 	id, rest := claudeSplit(ref)
 	if !claudeDashedish.MatchString(id) {
 		return "", false
 	}
-	if real, ok := undashIn(Served(), id); ok {
-		return real + rest, true
+	real, ok := undashIn(Served(), id)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	// the mark is the served id's to spell: one that names it [1M] takes
+	// [1M], so Claude Code's [1m] is not put on top of it. A served id
+	// with no mark keeps the one the agent asked with.
+	if claudeHas1M(real) {
+		rest = strings.TrimSuffix(rest, claude1MMark)
+	}
+	return real + rest, true
 }
 
 func undashIn(entries []Entry, id string) (string, bool) {
@@ -71,7 +115,9 @@ func undashIn(entries []Entry, id string) (string, bool) {
 		if e.ID == id {
 			return "", false // served as it is spelled
 		}
-		if e.ID == found || ClaudeDashed(e.ID) != id {
+		// a served id's own mark, [1m] or [1M], is no part of the id: the
+		// dashed spelling Claude Code is given names neither
+		if e.ID == found || ClaudeDashed(claudeCut1M(e.ID)) != id {
 			continue
 		}
 		if found != "" {
@@ -91,7 +137,8 @@ func ClaudeSpelled(ref string) string {
 	if d == id {
 		return ref
 	}
-	if real, ok := undashIn(Served(), d); ok && real == id {
+	// the served id undashIn gives back spells its own mark, [1m] or [1M]
+	if real, ok := undashIn(Served(), d); ok && claudeCut1M(real) == id {
 		return d + rest
 	}
 	return ref

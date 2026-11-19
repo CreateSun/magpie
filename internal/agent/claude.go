@@ -483,7 +483,7 @@ func claudeCapabilities(first []string, own, desktop bool) string {
 	var segs []seg
 	add := func(id string, levels []string) {
 		// as Claude Code is given it (provider.ClaudeSpelled)
-		id = strings.ToLower(strings.TrimSuffix(provider.ClaudeSpelled(id), "[1m]"))
+		id = strings.ToLower(provider.ClaudeCut1M(provider.ClaudeSpelled(id)))
 		if id == "" || strings.ContainsAny(id, ";=,") || strings.HasSuffix(id, "*") {
 			return
 		}
@@ -519,7 +519,7 @@ func claudeCapabilities(first []string, own, desktop bool) string {
 	}
 	rank := func(s seg) int {
 		if slices.ContainsFunc(first, func(f string) bool {
-			return strings.ToLower(strings.TrimSuffix(provider.ClaudeSpelled(f), "[1m]")) == s.id
+			return strings.ToLower(provider.ClaudeCut1M(provider.ClaudeSpelled(f))) == s.id
 		}) {
 			return 0
 		}
@@ -587,7 +587,7 @@ func followAt(tier, main, effort string) string {
 // no Claude model, is a Haiku already, or there is none. Of one model's
 // names it takes the one without a date.
 func claudeLight(main string) string {
-	ref := strings.TrimSuffix(main, "[1m]")
+	ref := provider.ClaudeCut1M(main)
 	i := strings.Index(ref, "/claude-")
 	if j := strings.Index(ref, "-claude-"); i < 0 || j >= 0 && j < i {
 		i = j
@@ -631,7 +631,7 @@ var claudeModelEnv = []string{
 // (roswellcsy on X).
 func claudeMagpieModel(v string) bool {
 	m, _ := tierAt(provider.ClaudeRead(v))
-	return isMagpie(strings.TrimSuffix(m, "[1m]"))
+	return isMagpie(provider.ClaudeCut1M(m))
 }
 
 // claudeSameModel says two of a tier's models as written are one model,
@@ -640,7 +640,7 @@ func claudeMagpieModel(v string) bool {
 func claudeSameModel(a, b string) bool {
 	ma, _ := tierAt(a)
 	mb, _ := tierAt(b)
-	return strings.EqualFold(strings.TrimSuffix(ma, "[1m]"), strings.TrimSuffix(mb, "[1m]"))
+	return strings.EqualFold(provider.ClaudeCut1M(ma), provider.ClaudeCut1M(mb))
 }
 
 // A tier (and the subagents' model) may run at an effort of its own (#536):
@@ -654,14 +654,13 @@ func claudeSameModel(a, b string) bool {
 // tierAt splits a tier's model as written into the model, [1m] mark and
 // all, and the effort it is fixed at, "" for none.
 func tierAt(v string) (model, effort string) {
-	const mark = "[1m]"
-	bare, marked := strings.CutSuffix(v, mark)
+	bare, marked := provider.ClaudeCut1M(v), provider.ClaudeHas1M(v)
 	m, e := provider.MemberEffort(bare)
 	if e == "" {
 		return v, ""
 	}
 	if marked {
-		m += mark
+		m += provider.ClaudeMark
 	}
 	return m, e
 }
@@ -671,11 +670,10 @@ func tierWith(model, effort string) string {
 	if model == "" || effort == "" {
 		return model
 	}
-	const mark = "[1m]"
-	bare, marked := strings.CutSuffix(model, mark)
+	bare, marked := provider.ClaudeCut1M(model), provider.ClaudeHas1M(model)
 	v := bare + ":" + effort
 	if marked {
-		v += mark
+		v += provider.ClaudeMark
 	}
 	return v
 }
@@ -683,7 +681,7 @@ func tierWith(model, effort string) string {
 // tierEfforts are the levels a tier on model can be fixed at: the ones
 // magpie knows the model has, else those Claude Code sends it.
 func tierEfforts(model string) []string {
-	id := strings.TrimSuffix(model, "[1m]")
+	id := provider.ClaudeCut1M(model)
 	for _, m := range sharedModels("claude") {
 		if m.ID == id && len(m.Efforts) > 0 {
 			return slices.DeleteFunc(slices.Clone(m.Efforts), func(l string) bool { return !contains(provider.MemberEfforts, l) })
@@ -872,8 +870,8 @@ func claudeIn(at place) *Agent {
 		if own(t) {
 			return false
 		}
-		was := strings.TrimSuffix(wroteMain(), "[1m]")
-		m = strings.TrimSuffix(m, "[1m]")
+		was := provider.ClaudeCut1M(wroteMain())
+		m = provider.ClaudeCut1M(m)
 		return m == "" || m == was || m == follow(t, was)
 	}
 
@@ -882,11 +880,11 @@ func claudeIn(at place) *Agent {
 	// picked since stands for another model, or none of magpie's
 	wroteAlias := func() bool {
 		m, _ := edit.GetJSON(path, "model")
-		if at.id != "" || !contains(claudeTiers, strings.TrimSuffix(m, "[1m]")) {
+		if at.id != "" || !contains(claudeTiers, provider.ClaudeCut1M(m)) {
 			return false
 		}
-		was := strings.TrimSuffix(stashShared()[mainKey], "[1m]")
-		return was != "" && isMagpie(was) && strings.TrimSuffix(mainModel(), "[1m]") == was
+		was := provider.ClaudeCut1M(stashShared()[mainKey])
+		return was != "" && isMagpie(was) && provider.ClaudeCut1M(mainModel()) == was
 	}
 
 	// the value shown: the catalog ref while routed, else Claude's own model.
@@ -1419,15 +1417,15 @@ func claudeIn(at place) *Agent {
 			refs = append(refs, pickerRefs()...)
 			for _, v := range refs {
 				m, _ := tierAt(v)
-				bare := strings.TrimSuffix(m, "[1m]")
+				bare := provider.ClaudeCut1M(m)
 				if v == "" || claudeModel(bare) || provider.ClaudeGroup(bare) {
 					continue
 				}
-				models = append(models, claudeBudget{id: spell(v), window: window[bare], long: strings.HasSuffix(v, "[1m]"), compact: work(bare, false)})
+				models = append(models, claudeBudget{id: spell(v), window: window[bare], long: provider.ClaudeHas1M(v), compact: work(bare, false)})
 			}
 			// the one for every model else, as the variable gave it: none
 			// on a Claude main model, which Anthropic runs to its own
-			if m, _ := tierAt(main); !claudeModel(strings.TrimSuffix(m, "[1m]")) && !provider.ClaudeGroup(strings.TrimSuffix(m, "[1m]")) {
+			if m, _ := tierAt(main); !claudeModel(provider.ClaudeCut1M(m)) && !provider.ClaudeGroup(provider.ClaudeCut1M(m)) {
 				def = claudeCompactCap(s.Compact())
 			}
 		}
@@ -1462,7 +1460,7 @@ func claudeIn(at place) *Agent {
 	// of no known window keeps the last.
 	pickerApart := func(main string, tiers map[string]string) bool {
 		m, _ := tierAt(main)
-		bare := strings.TrimSuffix(m, "[1m]")
+		bare := provider.ClaudeCut1M(m)
 		if main == "" || !claudeModel(bare) && !provider.ClaudeGroup(bare) || claudeWindow(main, tiers) > 0 {
 			return false
 		}
@@ -1472,7 +1470,7 @@ func claudeIn(at place) *Agent {
 		}
 		for _, v := range pickerRefs() {
 			m, _ := tierAt(v)
-			if strings.HasSuffix(m, "[1m]") || claudeModel(m) || provider.ClaudeGroup(m) {
+			if provider.ClaudeHas1M(m) || claudeModel(m) || provider.ClaudeGroup(m) {
 				continue
 			}
 			if window[m] > 0 {
@@ -1765,7 +1763,7 @@ func claudeIn(at place) *Agent {
 		forget(autoKey)
 		// the advisor goes where it is on magpie's model, and its switch
 		// where magpie wrote it
-		if isMagpie(strings.TrimSuffix(claudeReadOwn(jsonGet(path, "advisorModel")()), "[1m]")) {
+		if isMagpie(provider.ClaudeCut1M(claudeReadOwn(jsonGet(path, "advisorModel")()))) {
 			if err := edit.DelJSON(path, "advisorModel"); err != nil {
 				return "", err
 			}
@@ -1900,8 +1898,8 @@ func claudeIn(at place) *Agent {
 			// following and was lost on the next move (#2257), as was a
 			// haiku tier given Opus (it follows Opus on its Haiku).
 			same := func(t, m string) bool {
-				m = strings.TrimSuffix(m, "[1m]")
-				return m == strings.TrimSuffix(v, "[1m]") || m == strings.TrimSuffix(follow(t, v), "[1m]")
+				m = provider.ClaudeCut1M(m)
+				return m == provider.ClaudeCut1M(v) || m == provider.ClaudeCut1M(follow(t, v))
 			}
 			if !routed() {
 				forget(ownKey("subagent"))
@@ -1968,8 +1966,8 @@ func claudeIn(at place) *Agent {
 		}
 		for _, t := range []string{"sonnet", "opus", "haiku", "fable"} {
 			if tiers[t] != "" && spell(tiers[t]) == id {
-				if strings.HasSuffix(id, "[1m]") {
-					return t + "[1m]"
+				if provider.ClaudeHas1M(id) {
+					return t + provider.ClaudeMark
 				}
 				return t
 			}
@@ -2464,7 +2462,7 @@ func claudeIn(at place) *Agent {
 				}
 				return fmt.Errorf("pick a model through magpie for Claude Code first; its advisor can then have a model")
 			}
-			if v != "" && !isMagpie(strings.TrimSuffix(v, "[1m]")) {
+			if v != "" && !isMagpie(provider.ClaudeCut1M(v)) {
 				return fmt.Errorf("advisor: %q is not a model magpie serves", v)
 			}
 			if v == "" {
@@ -2637,7 +2635,7 @@ func claudeIn(at place) *Agent {
 			if m, ts := curTiers(); m != "" {
 				word, cur := mainWord(m, ts), jsonGet(path, "model")()
 				if cur != word && word != spell(m) {
-					if r, _ := tierAt(claudeReadOwn(cur)); isMagpie(strings.TrimSuffix(r, "[1m]")) {
+					if r, _ := tierAt(claudeReadOwn(cur)); isMagpie(provider.ClaudeCut1M(r)) {
 						return writeTiers(m, ts)
 					}
 				}
@@ -2676,7 +2674,7 @@ func claudeIn(at place) *Agent {
 		// one, comes out
 		Follow: func() error {
 			main := mainModel()
-			bare := strings.TrimSuffix(main, "[1m]")
+			bare := provider.ClaudeCut1M(main)
 			if !routed() || !isMagpie(bare) {
 				return nil
 			}
@@ -2684,7 +2682,7 @@ func claudeIn(at place) *Agent {
 			// now follows on that model's Haiku, moves too
 			m, _ := tierAt(env(tierEnv("haiku")))
 			light := follow("haiku", bare)
-			stays := light == bare || strings.TrimSuffix(m, "[1m]") == light || !follows("haiku", m)
+			stays := light == bare || provider.ClaudeCut1M(m) == light || !follows("haiku", m)
 			// so does a fable tier it left on a Claude model, where it now
 			// follows on none (follow), unless at an effort of its own
 			fm, fe := tierAt(env(tierEnv("fable")))
@@ -2795,7 +2793,7 @@ func claudeTakes(model, v string) error {
 // bare word and not one of its aliases: `magpie claude ultra` wrote
 // "model": "ultra" over the model.
 func claudeModelWord(v, model string) error {
-	w := strings.TrimSuffix(v, "[1m]")
+	w := provider.ClaudeCut1M(v)
 	if contains(claudeAliases, w) || strings.ContainsAny(w, "-./:_0123456789") {
 		return nil
 	}
@@ -2857,8 +2855,7 @@ func claudeOwn(cur string, tier func(string) string, ms []catalog.Model) []Optio
 // claude-opus-4-5-20251101, the one model) as that one's Alias. Two dated
 // ids of one name are two models, and left as they are.
 func claudeDated(opts []Option) []Option {
-	const mark = "[1m]"
-	bare := func(v string) string { return strings.TrimSuffix(v, mark) }
+	bare := provider.ClaudeCut1M
 	type key struct{ group, value string }
 	alias := map[key]int{}
 	for i, o := range opts {
@@ -2890,8 +2887,7 @@ func claudeDated(opts []Option) []Option {
 // Sonnet otherwise. default is the one Claude Code picks by the account's
 // plan, which magpie doesn't say. ok is false for a value that is no alias.
 func claudeAliasOption(v string, ms []catalog.Model, tier func(string) string) (Option, bool) {
-	const mark = "[1m]"
-	w := strings.TrimSuffix(v, mark)
+	w := provider.ClaudeCut1M(v)
 	if w == "" || !contains(claudeAliases, w) {
 		return Option{}, false
 	}
@@ -2933,8 +2929,8 @@ func claudeAliasOption(v string, ms []catalog.Model, tier func(string) string) (
 	if !strings.HasPrefix(id, "claude") {
 		o.Icon = modelIcon("", id)
 	}
-	if strings.HasSuffix(v, mark) && !strings.HasSuffix(id, mark) {
-		id += mark
+	if provider.ClaudeHas1M(v) && !provider.ClaudeHas1M(id) {
+		id += provider.ClaudeMark
 	}
 	o.Label, o.Note = v+" · "+id, name
 	return o, true
@@ -2991,17 +2987,16 @@ func claude1M() func(ref string) string { return claude1MFor("claude") }
 // claude1MFor is claude1M for a Claude Code run by another agent, by the
 // models magpie shows that one (T3 Code's, t3code.go).
 func claude1MFor(agent string) func(ref string) string {
-	const mark = "[1m]"
 	window := map[string]int{}
 	for _, m := range sharedModels(agent) {
 		window[m.ID] = m.Context
 	}
 	return func(ref string) string {
-		if ref == "" || strings.HasSuffix(ref, mark) {
+		if ref == "" || provider.ClaudeHas1M(ref) {
 			return ref
 		}
 		if cmp.Or(window[ref], catalog.ContextOf(ref)) >= 1_000_000 {
-			return ref + mark
+			return ref + provider.ClaudeMark
 		}
 		return ref
 	}
@@ -3015,7 +3010,7 @@ func claude1MFor(agent string) func(ref string) string {
 // Claude's (provider.ClaudeGroup) while the model alone was held to the
 // working window (划船不靠桨 on Discord).
 func claudeModel(ref string) bool {
-	return provider.ClaudeModel(strings.TrimSuffix(ref, "[1m]"))
+	return provider.ClaudeModel(provider.ClaudeCut1M(ref))
 }
 
 // claudeOwnCompact says the settings.json at path has an auto-compact
@@ -3037,9 +3032,9 @@ func claudeOwnCompact(path, model string) bool {
 		return false
 	}
 	// Claude Code keys it by the model as it was given it (ClaudeSpelled)
-	model = strings.ToLower(provider.ClaudeDashed(strings.TrimSuffix(strings.TrimPrefix(model, "magpie/"), "[1m]")))
+	model = strings.ToLower(provider.ClaudeDashed(provider.ClaudeCut1M(strings.TrimPrefix(model, "magpie/"))))
 	for k, v := range per {
-		if v.Window != nil && strings.ToLower(provider.ClaudeDashed(strings.TrimSuffix(k, "[1m]"))) == model {
+		if v.Window != nil && strings.ToLower(provider.ClaudeDashed(provider.ClaudeCut1M(k))) == model {
 			return true
 		}
 	}
@@ -3050,7 +3045,7 @@ func claudeOwnCompact(path, model string) bool {
 // by its "[1m]", not one of Claude's own, which Anthropic runs to its own.
 func claudeLongMain(main string) bool {
 	m, _ := tierAt(main)
-	bare := strings.TrimSuffix(m, "[1m]")
+	bare := provider.ClaudeCut1M(m)
 	return bare != m && !claudeModel(bare) && !provider.ClaudeGroup(bare)
 }
 
@@ -3059,17 +3054,16 @@ func claudeLongMain(main string) bool {
 // marked [1m]: the main model's, or when that one is marked, the smallest of
 // the tiers' that aren't, so none of them outgrows its own.
 func claudeWindow(main string, tiers map[string]string) int {
-	const mark = "[1m]"
 	window := map[string]int{}
 	for _, m := range sharedModels("claude") {
 		window[m.ID] = m.Context
 	}
-	if !strings.HasSuffix(main, mark) {
+	if !provider.ClaudeHas1M(main) {
 		return window[main]
 	}
 	w := 0
 	for _, t := range claudeTiers {
-		if v, _ := tierAt(tiers[t]); !strings.HasSuffix(v, mark) {
+		if v, _ := tierAt(tiers[t]); !provider.ClaudeHas1M(v) {
 			if c := window[v]; c > 0 && (w == 0 || c < w) {
 				w = c
 			}
@@ -3123,7 +3117,7 @@ func claudeOutput(models ...string) int {
 		if ref == "" || claudeModel(ref) {
 			continue
 		}
-		ref = strings.TrimSuffix(ref, "[1m]")
+		ref = provider.ClaudeCut1M(ref)
 		o := cmp.Or(output[ref], catalog.OutputOf(ref))
 		if o <= 0 {
 			return 0
@@ -3225,7 +3219,7 @@ func claudeClassifierIn(at place, model string) string {
 	if st[at.key("claude.tier_own.sonnet")] != "" {
 		return ""
 	}
-	bare := func(v string) string { m, _ := tierAt(v); return strings.TrimSuffix(m, "[1m]") }
+	bare := func(v string) string { m, _ := tierAt(v); return provider.ClaudeCut1M(m) }
 	tier, effort := tierAt(env(tierEnv("sonnet")))
 	if tier == "" || bare(claudeReadOwn(model)) != bare(tier) {
 		return ""
@@ -3252,7 +3246,7 @@ func claudeStandInAt(at place, path, model string) string {
 	}
 	// the model Claude Code is set to itself, by that id, is its own pick
 	// rather than a tier's
-	bare := func(v string) string { m, _ := tierAt(v); return strings.TrimSuffix(m, "[1m]") }
+	bare := func(v string) string { m, _ := tierAt(v); return provider.ClaudeCut1M(m) }
 	main := claudeMain(path)
 	if main != "" && bare(main) == bare(model) {
 		return main
@@ -3331,7 +3325,7 @@ func claudeAsk(at place, path, u string) {
 func claudeMain(path string) string {
 	env := func(k string) string { v, _ := edit.GetJSON(path, "env."+k); return v }
 	m, _ := edit.GetJSON(path, "model")
-	if t := strings.TrimSuffix(m, "[1m]"); contains(claudeTiers, t) {
+	if t := provider.ClaudeCut1M(m); contains(claudeTiers, t) {
 		m = env(tierEnv(t))
 	}
 	if m == "" {
